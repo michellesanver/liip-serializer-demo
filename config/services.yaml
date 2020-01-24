@@ -1,0 +1,103 @@
+# This file is the entry point to configure your own services.
+# Files in the packages/ subdirectory configure your dependencies.
+
+# Put parameters here that don't need to change on each machine where the app is deployed
+# https://symfony.com/doc/current/best_practices/configuration.html#application-related-configuration
+parameters:
+
+services:
+    # default configuration for services in *this* file
+    _defaults:
+        autowire: true      # Automatically injects dependencies in your services.
+        autoconfigure: true # Automatically registers your services as commands, event subscribers, etc.
+        bind:
+            $cacheDirectory: "%kernel.cache_dir%/liip_serializer"
+
+    # makes classes in src/ available to be used as services
+    # this creates a service per class whose id is the fully-qualified class name
+    App\:
+        resource: '../src/*'
+        exclude: '../src/{DependencyInjection,Entity,Migrations,Tests,Kernel.php}'
+
+    # controllers are imported separately to make sure services can be injected
+    # as action arguments even if you don't extend any base controller class
+    App\Controller\:
+        resource: '../src/Controller'
+        tags: ['controller.service_arguments']
+
+    App\Serializer\:
+        resource: '%kernel.project_dir%/src/Serializer/*'
+        # The generator command is only added for the DEV environment, see: `services_dev.yaml`
+        exclude:  '%kernel.project_dir%/src/Serializer/Command/SerializerGeneratorCommand.php'
+
+    Liip\MetadataParser\:
+        resource: '%kernel.project_dir%/vendor/liip/metadata-parser/src/*'
+        exclude: '%kernel.project_dir%/vendor/liip/metadata-parser/src/{Model,Reducer}/'
+
+    Liip\MetadataParser\Builder:
+        public: true
+
+    Liip\MetadataParser\Parser:
+        arguments:
+            $parsers:
+                - '@Liip\MetadataParser\ModelParser\ReflectionParser'
+                - '@Liip\MetadataParser\ModelParser\PhpDocParser'
+                - '@Liip\MetadataParser\ModelParser\JMSParser'
+                - '@Liip\MetadataParser\ModelParser\LiipMetadataAnnotationParser'
+
+    Liip\MetadataParser\RecursionChecker:
+        arguments:
+            $expectedRecursions:
+                - [ 'alternatives', 'supermarket', '*', 'alternatives' ]
+                - [ 'discounted_prices', 'discount', 'alternatives' ]
+
+    #
+    # The following blocks are required to configure the Liip/Serializer services, as there is no bundle (yet)
+    #
+    Liip\Serializer\Serializer:
+        $cacheDirectory: "%kernel.cache_dir%/liip_serializer"
+
+    Liip\Serializer\Template\Deserialization: ~
+
+    Liip\Serializer\DeserializerGenerator:
+        $templating: '@Liip\Serializer\Template\Deserialization'
+        $classesToGenerate:
+            - 'App\Model\Product'
+        $cacheDirectory: "%kernel.cache_dir%/liip_serializer"
+
+    Liip\Serializer\Template\Serialization: ~
+
+    Liip\Serializer\SerializerGenerator:
+        $templating: '@Liip\Serializer\Template\Serialization'
+        $apiVersions: ['1', '2', '3', '4', '5', '6']
+        $classesToGenerate:
+            'App\Model\Product':
+                - ['api']
+                - ['api', 'product-details']
+                - ['api', 'product-details', 'product-full']
+        $cacheDirectory: "%kernel.cache_dir%/liip_serializer"
+
+    Liip\Serializer\Compiler:
+        $metadataBuilder: '@Liip\MetadataParser\Builder'
+        $deserializerGenerator: '@Liip\Serializer\DeserializerGenerator'
+        $serializerGenerator: '@Liip\Serializer\SerializerGenerator'
+
+    # we should do semantic configuration, this list is the same as the keys in $classesToGenerate
+    Liip\Serializer\Adapter\JMS\JMSSerializerAdapter:
+        $originalSerializer: '@jms_serializer'
+        $liipSerializer: '@Liip\Serializer\Serializer'
+        $logger: '@Psr\Log\LoggerInterface'
+        $enabledClasses:
+            - 'App\Model\Product'
+
+    Liip\Serializer\Adapter\JMS\AdapterSerializationContextFactory: ~
+
+    # Do this to quickly replace JMS serializer!
+    # JMS\Serializer\SerializerInterface:
+    #    alias: Liip\Serializer\Adapter\JMS\JMSSerializerAdapter
+
+    JMS\Serializer\ArrayTransformerInterface:
+        alias: Liip\Serializer\Adapter\JMS\JMSSerializerAdapter
+
+    JMS\Serializer\Naming\PropertyNamingStrategyInterface:
+        alias: jms_serializer.naming_strategy
